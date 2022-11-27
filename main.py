@@ -14,24 +14,36 @@ def compiler(builder, content):
     printf_func = ir.Function(builder.module, ir.FunctionType(ir.IntType(32), [], var_arg = True), "printf")
     getch_func = ir.Function(builder.module, ir.FunctionType(ir.IntType(8), [], var_arg = True), "getch")
 
-    pointer, pos, start = 0, 0, []
-    array = [0]
+    array_size = 1024
+    array = ir.Constant(ir.ArrayType(ir.IntType(8), array_size), [0] * array_size)
+    array_ptr = builder.alloca(array.type)
+    builder.store(array, array_ptr)
 
-    while len(content) > pos:
-        if content[pos] == "<": pointer -= 1
-        elif content[pos] == ">": pointer += 1
-        elif content[pos] == "+": array[pointer] += 1
-        elif content[pos] == "-": array[pointer] -= 1
-        elif content[pos] == ".": builder.call(printf_func, args = [create_string(builder, "%c"),
-                                                                    ir.Constant(ir.IntType(8), array[pointer]) if isinstance(array[pointer], int) else array[pointer]])
-        elif content[pos] == ",": array[pointer] = builder.call(getch_func, args = [])
-        elif content[pos] == "[": start.append(pos)
-        elif content[pos] == "]":
-            if array[pointer] > 0: pos = start[len(start) - 1] - 1
-            else: start.pop(len(start) - 1)
+    pointer = ir.Constant(ir.IntType(32), 0)
+    pointer_ptr = builder.alloca(pointer.type)
+    builder.store(pointer, pointer_ptr)
+
+    for i in content:
+        if i == "<": builder.store(builder.sub(builder.load(pointer_ptr), ir.Constant(ir.IntType(32), 1)), pointer_ptr)
+        elif i == ">": builder.store(builder.add(builder.load(pointer_ptr), ir.Constant(ir.IntType(32), 1)), pointer_ptr)
+        elif i == "+":
+            tmp_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), builder.load(pointer_ptr)])
+            builder.store(builder.add(builder.load(tmp_ptr), ir.Constant(ir.IntType(8), 1)), tmp_ptr)
+        elif i == "-":
+            tmp_ptr = builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), builder.load(pointer_ptr)])
+            builder.store(builder.sub(builder.load(tmp_ptr), ir.Constant(ir.IntType(8), 1)), tmp_ptr)
+        elif i == ".": builder.call(printf_func, args = [create_string(builder, "%c"), builder.load(builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), builder.load(pointer_ptr)]))])
+        elif i == ",": builder.store(builder.call(getch_func, args = []), builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), builder.load(pointer_ptr)]))
+        elif i == "[":
+            current = builder.append_basic_block()
+            builder.branch(current)
+            builder.position_at_end(current)
+        elif i == "]":
+            res = builder.icmp_signed("==", builder.load(builder.gep(array_ptr, [ir.Constant(ir.IntType(32), 0), builder.load(pointer_ptr)])), ir.Constant(ir.IntType(8), 0))
+            next = builder.append_basic_block()
+            builder.cbranch(res, next, builder.block)
+            builder.position_at_end(next)
         else: ...
-        if pointer > len(array) - 1: array.append(0)
-        pos += 1
 
     builder.ret(ir.Constant(ir.IntType(32), 0))
 
@@ -64,7 +76,9 @@ def main(argv):
     os.remove("temp.bc")
     subprocess.run(["llc", "-filetype=obj", "temp.llvm", "-o", "temp.o"])
     os.remove("temp.llvm")
-    subprocess.run(["g++", "temp.o", "-o", executable])
+    subprocess.run(["g++", os.path.split(__file__)[0] + "/asm/__chkstk.s", "-c", "-o", "__chkstk.o"])
+    subprocess.run(["g++", "temp.o", "__chkstk.o", "-o", executable])
+    os.remove("__chkstk.o")
     os.remove("temp.o")
 
     with open(executable, "rb") as file:
