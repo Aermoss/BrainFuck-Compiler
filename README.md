@@ -1,5 +1,5 @@
 # BrainFuck Compiler
-A simple BrainFuck compiler written in python using llvmlite.
+A simple BrainFuck compiler written in Python using LLVM.
 
 # Getting Started
 ## Usage
